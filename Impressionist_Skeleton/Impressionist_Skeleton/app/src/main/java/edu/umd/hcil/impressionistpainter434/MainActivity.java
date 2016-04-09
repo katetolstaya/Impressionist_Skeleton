@@ -1,10 +1,16 @@
 package edu.umd.hcil.impressionistpainter434;
 
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -19,6 +25,8 @@ import android.view.View;
 import android.webkit.URLUtil;
 import android.widget.ActionMenuView;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.PopupMenu;
 import android.widget.PopupMenu.OnMenuItemClickListener;
 import android.widget.Toast;
@@ -27,12 +35,14 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Date;
 
 public class MainActivity extends AppCompatActivity implements OnMenuItemClickListener {
 
     private static int RESULT_LOAD_IMAGE = 1;
-    private  ImpressionistView _impressionistView;
-
+    private static int REQUEST_IMAGE_CAPTURE = 2;
     // These images are downloaded and added to the Android Gallery when the 'Download Images' button is clicked.
     // This was super useful on the emulator where there are no images by default
     private static String[] IMAGE_URLS ={
@@ -55,6 +65,19 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
             "http://www.cs.umd.edu/class/spring2016/cmsc434/assignments/IA08-AndroidII/Images/WhiteFlower_PhotoByJonFroehlich(Medium).JPG",
             "http://www.cs.umd.edu/class/spring2016/cmsc434/assignments/IA08-AndroidII/Images/YellowFlower_PhotoByJonFroehlich(Medium).JPG",
     };
+    //File photoFile = null;
+
+    //private SensorManager mSensorManager;
+    //private Sensor mSensor;
+
+
+
+//    public void onSensorChanged(SensorEvent event){
+//        _impressionistView.updateSensorValues(event,getApplicationContext());
+//
+//    }
+    String mCurrentPhotoPath;
+    private  ImpressionistView _impressionistView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -65,6 +88,16 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
         ImageView imageView = (ImageView)findViewById(R.id.viewImage);
         _impressionistView.setImageView(imageView);
 
+        LinearLayout linearlayout = (LinearLayout)findViewById(R.id.layout1);
+        if (getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            // landscape
+            linearlayout.setOrientation(LinearLayout.HORIZONTAL);
+        }
+        else {
+            // portrait
+            linearlayout.setOrientation(LinearLayout.VERTICAL);
+        }
+
         if (shouldAskPermission()){
             String[] perms = {"android.permission. WRITE_EXTERNAL_STORAGE"};
 
@@ -72,6 +105,26 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
 
             requestPermissions(perms, permsRequestCode);
         }
+
+    }
+
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+
+        LinearLayout linearlayout = (LinearLayout)findViewById(R.id.layout1);
+
+        // Checks the orientation of the screen
+        if (newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            // landscape
+            linearlayout.setOrientation(LinearLayout.HORIZONTAL);
+        } else if (newConfig.orientation == Configuration.ORIENTATION_PORTRAIT){
+            //  portrait
+            linearlayout.setOrientation(LinearLayout.VERTICAL);
+        }
+
+        _impressionistView.invalidate();
+        ImageView imageView = (ImageView)findViewById(R.id.viewImage);
+        imageView.invalidate();
 
     }
 
@@ -92,6 +145,11 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
                         _impressionistView.clearPainting();
                     }})
                 .setNegativeButton(android.R.string.no, null).show();
+    }
+
+    public void onButtonClickSave(View v) {
+        Context context = getApplicationContext();
+        _impressionistView.savePainting(context);
     }
 
     public void onButtonClickSetBrush(View v) {
@@ -115,18 +173,9 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
                 Toast.makeText(this, "Line Brush", Toast.LENGTH_SHORT).show();
                 _impressionistView.setBrushType(BrushType.Line);
                 return true;
-            case R.id.menuCircleSplatter:
-                Toast.makeText(this, "Circle Splatter Brush", Toast.LENGTH_SHORT).show();
-                _impressionistView.setBrushType(BrushType.CircleSplatter);
-                return true;
-            case R.id.menuLineSplatter:
-                Toast.makeText(this, "Line Splatter Brush", Toast.LENGTH_SHORT).show();
-                _impressionistView.setBrushType(BrushType.LineSplatter);
-                return true;
         }
         return false;
     }
-
 
     /**
      * Downloads test images to use in the assignment. Feel free to use any images you want. I only made this
@@ -194,6 +243,27 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
         startActivityForResult(i, RESULT_LOAD_IMAGE);
     }
 
+    public void onButtonClickTakeImage(View v){
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        // Ensure that there's a camera activity to handle the intent
+        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+            // Create the File where the photo should go
+            File photoFile = null;
+            try {
+                photoFile = createImageFile();
+            } catch (IOException ex) {
+                // Error occurred while creating the File
+                //...
+            }
+            // Continue only if the File was successfully created
+            if (photoFile != null) {
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT,
+                        Uri.fromFile(photoFile));
+                startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+            }
+        }
+    }
+
     /**
      * Called automatically when an image has been selected in the Gallery
      *
@@ -209,17 +279,26 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
             Uri imageUri = data.getData();
 
             try {
-                Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), imageUri);
+               Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), imageUri);
+                //Bitmap bitmap = BitmapFactory.decodeFile(imageUri.getPath());
                 ImageView imageView = (ImageView) findViewById(R.id.viewImage);
 
-                // destroy the drawing cache to ensure that when a new image is loaded, its cached
                 imageView.destroyDrawingCache();
                 imageView.setImageBitmap(bitmap);
                 imageView.setDrawingCacheEnabled(true);
+                imageView.invalidate();
+
             } catch (IOException e) {
                 e.printStackTrace();
             }
+            //setPic(imageUri.getPath());
 
+        }
+       else if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK && null != data) {
+            // setPic(mCurrentPhotoPath);
+            ImageView imageView = (ImageView) findViewById(R.id.viewImage);
+            Bitmap photo = (Bitmap) data.getExtras().get("data");
+            imageView.setImageBitmap(photo);
         }
     }
 
@@ -233,6 +312,47 @@ public class MainActivity extends AppCompatActivity implements OnMenuItemClickLi
 
     }
 
+    private File createImageFile() throws IOException {
+        // Create an image file name
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
+        String imageFileName = "JPEG_" + timeStamp + "_";
+        File storageDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefix */
+                ".jpg",         /* suffix */
+                storageDir      /* directory */
+        );
 
+        // Save a file: path for use with ACTION_VIEW intents
+        mCurrentPhotoPath = "file:" + image.getAbsolutePath();
+        return image;
+    }
+
+    private void setPic(String path) {
+        ImageView imageView = (ImageView) findViewById(R.id.viewImage);
+
+        // Get the dimensions of the View
+        int targetW = imageView.getWidth();
+        int targetH = imageView.getHeight();
+
+        // Get the dimensions of the bitmap
+        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
+        bmOptions.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(path, bmOptions);
+        int photoW = bmOptions.outWidth;
+        int photoH = bmOptions.outHeight;
+
+        // Determine how much to scale down the image
+        int scaleFactor = Math.min(photoW/targetW, photoH/targetH);
+
+        // Decode the image file into a Bitmap sized to fill the View
+        bmOptions.inJustDecodeBounds = false;
+        bmOptions.inSampleSize = scaleFactor;
+        bmOptions.inPurgeable = true;
+
+        Bitmap bitmap = BitmapFactory.decodeFile(path, bmOptions);
+        imageView.setImageBitmap(bitmap);
+    }
 
 }
